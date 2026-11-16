@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+  <title>Firebase 채팅</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#5c6ef8" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="채팅" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #08090f;
+      font-family: 'DM Sans', sans-serif;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #2a2f45; border-radius: 3px; }
+
+    /* ── 모달 공통 ── */
+    .modal-bg {
+      position: fixed; inset: 0;
+      background: rgba(8,10,18,0.92);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; backdrop-filter: blur(8px);
+    }
+    .modal-box {
+      background: #12151f; border: 1px solid #2a2f45; border-radius: 20px;
+      padding: 40px 36px; width: min(360px, 92vw);
+      display: flex; flex-direction: column; gap: 18px;
+    }
+    .modal-title { color: #e8eaf0; font-weight: 800; font-size: 22px; }
+    .modal-sub   { color: #6b7290; font-size: 13px; margin-top: 4px; line-height: 1.5; }
+
+    input.field, textarea.field {
+      background: #0d0f1a; border: 1.5px solid #2a2f45; border-radius: 10px;
+      padding: 12px 15px; color: #e8eaf0; font-size: 14.5px; outline: none;
+      font-family: 'DM Sans', sans-serif; transition: border-color .2s; width: 100%;
+    }
+    input.field:focus, textarea.field:focus { border-color: #5c6ef8; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #5c6ef8, #8b5cf6);
+      border: none; border-radius: 10px; padding: 13px;
+      color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
+      font-family: 'DM Sans', sans-serif; width: 100%; transition: opacity .15s;
+    }
+    .btn-primary:hover { opacity: .88; }
+    .btn-secondary {
+      background: #1e2235; border: none; border-radius: 10px; padding: 11px;
+      color: #6b7290; font-weight: 600; font-size: 13px; cursor: pointer;
+      font-family: 'DM Sans', sans-serif; flex: 1; transition: background .15s;
+    }
+    .btn-secondary:hover { background: #252a40; }
+
+    .error-msg { color: #f87171; font-size: 12px; display: none; }
+    .error-msg.show { display: block; }
+
+    /* ── 전체 레이아웃 ── */
+    #app {
+      display: none;
+      flex-direction: column;
+      height: 100dvh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── 헤더 ── */
+    #header {
+      height: 56px;
+      background: #0e1020;
+      border-bottom: 1px solid #1e2235;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 10px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    #header .logo {
+      width: 32px; height: 32px; border-radius: 9px;
+      background: linear-gradient(135deg, #5c6ef8, #8b5cf6);
+      display: flex; align-items: center; justify-content: center; font-size: 16px;
+      flex-shrink: 0;
+    }
+    #header .title { color: #e8eaf0; font-weight: 800; font-size: 14px; }
+    #header .subtitle { display: flex; align-items: center; gap: 5px; }
+    #header .dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; }
+    #header .online { color: #6b7290; font-size: 11px; }
+
+    #members-btn {
+      background: #1a1d2e; border: 1px solid #2a2f45; border-radius: 8px;
+      padding: 6px 10px; cursor: pointer; color: #6b7290; font-size: 13px;
+      transition: all .15s; display: flex; align-items: center; gap: 5px;
+      font-family: 'DM Sans', sans-serif;
+    }
+    #members-btn:hover { border-color: #5c6ef8; color: #a5b4fc; }
+
+    #nick-btn {
+      display: flex; align-items: center; gap: 7px; margin-left: auto;
+      background: #1a1d2e; border: 1px solid #2a2f45; border-radius: 22px;
+      padding: 5px 12px 5px 7px; cursor: pointer; transition: border-color .2s;
+      flex-shrink: 0;
+    }
+    #nick-btn:hover { border-color: #5c6ef8; }
+    .nick-label { color: #cdd1e6; font-size: 13px; font-weight: 600; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nick-edit { color: #6b7290; font-size: 10px; }
+
+    /* ── 채널 탭 바 ── */
+    #channel-bar {
+      background: #0b0d18;
+      border-bottom: 1px solid #1e2235;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 4px;
+      overflow-x: auto;
+      flex-shrink: 0;
+      scrollbar-width: none;
+    }
+    #channel-bar::-webkit-scrollbar { display: none; }
+
+    .ch-tab {
+      padding: 8px 14px;
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b7290;
+      white-space: nowrap;
+      border: 1px solid transparent;
+      border-bottom: none;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      top: 1px;
+    }
+    .ch-tab:hover { color: #a5b4fc; background: #1a1d2e; }
+    .ch-tab.active {
+      color: #e8eaf0;
+      background: #0e1020;
+      border-color: #2a2f45;
+      border-bottom-color: #0e1020;
+    }
+    .ch-tab .ch-badge {
+      background: #5c6ef8;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 10px;
+      min-width: 16px;
+      text-align: center;
+    }
+    .ch-unread { background: #f87171 !important; }
+
+    #add-ch-btn {
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 18px;
+      color: #404565;
+      background: none;
+      border: none;
+      transition: color .15s;
+      flex-shrink: 0;
+      font-family: 'DM Sans', sans-serif;
+    }
+    #add-ch-btn:hover { color: #5c6ef8; }
+
+    /* ── 메인 바디 (메시지 + 멤버 패널) ── */
+    #body-wrap {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ── 메시지 영역 ── */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 0 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    #empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 40px;
+    }
+    #empty .emoji { font-size: 44px; }
+    #empty .main  { color: #6b7290; font-weight: 700; font-size: 15px; }
+    #empty .sub   { color: #404565; font-size: 12px; text-align: center; }
+
+    /* ── 메시지 버블 ── */
+    .msg-row {
+      display: flex; gap: 10px; align-items: flex-start;
+      padding: 5px 14px; border-radius: 8px; position: relative;
+      transition: background .12s;
+    }
+    .msg-row:hover { background: #1a1d2e; }
+    .msg-row:hover .msg-actions { opacity: 1; pointer-events: auto; }
+
+    .avatar {
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; flex-shrink: 0;
+    }
+    .msg-nick  { font-weight: 700; font-size: 13.5px; }
+    .msg-time  { color: #404565; font-size: 10.5px; margin-left: 7px; }
+    .msg-me-tag { color: #404565; font-weight: 400; font-size: 10px; margin-left: 4px; }
+    .msg-text  { color: #cdd1e6; font-size: 14px; line-height: 1.55; word-break: break-word; margin-top: 3px; }
+    .msg-text.edited::after { content: " (수정됨)"; color: #404565; font-size: 11px; }
+    .msg-img   {
+      max-width: min(260px, 70vw); max-height: 200px; border-radius: 10px;
+      cursor: zoom-in; border: 1px solid #2a2f45; display: block; margin-top: 3px;
+    }
+
+    /* 메시지 액션 버튼들 */
+    .msg-actions {
+      position: absolute; top: 4px; right: 10px;
+      display: flex; gap: 4px;
+      opacity: 0; pointer-events: none;
+      transition: opacity .12s;
+    }
+    .action-btn {
+      background: #1e2235; border: 1px solid #2a2f45;
+      border-radius: 7px; padding: 4px 9px;
+      font-size: 11.5px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-weight: 600;
+      transition: all .12s;
+    }
+    .edit-action { color: #a5b4fc; }
+    .edit-action:hover { background: #2a2f45; border-color: #5c6ef8; }
+    .del-action { color: #f87171; }
+    .del-action:hover { background: #2a1a1a; border-color: #5a2a2a; }
+
+    /* 인라인 수정 */
+    .edit-area {
+      display: none;
+      margin-top: 5px;
+    }
+    .edit-area.open { display: flex; flex-direction: column; gap: 6px; }
+    .edit-textarea {
+      background: #0d0f1a; border: 1.5px solid #5c6ef8; border-radius: 9px;
+      padding: 9px 12px; color: #e8eaf0; font-size: 13.5px; outline: none;
+      font-family: 'DM Sans', sans-serif; resize: none; line-height: 1.5;
+      width: 100%;
+    }
+    .edit-btns { display: flex; gap: 7px; }
+    .edit-save { background: #5c6ef8; border: none; border-radius: 7px; padding: 6px 14px; color: #fff; font-size: 12px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-weight: 700; }
+    .edit-cancel { background: #1e2235; border: none; border-radius: 7px; padding: 6px 12px; color: #6b7290; font-size: 12px; cursor: pointer; font-family: 'DM Sans', sans-serif; }
+
+    /* ── 멤버 패널 (슬라이드) ── */
+    #members-panel {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 220px;
+      background: #0b0d18;
+      border-left: 1px solid #1e2235;
+      transform: translateX(100%);
+      transition: transform .28s cubic-bezier(.4,0,.2,1);
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #members-panel.open { transform: translateX(0); }
+
+    #members-overlay {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 19;
+      display: none;
+    }
+    #members-overlay.show { display: block; }
+
+    .panel-header {
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid #1e2235;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-title { color: #e8eaf0; font-weight: 700; font-size: 14px; }
+    .panel-close { background: none; border: none; color: #6b7290; font-size: 18px; cursor: pointer; line-height: 1; }
+    .panel-close:hover { color: #e8eaf0; }
+
+    .member-list { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+    .member-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 9px;
+    }
+    .member-item.me { background: #1a1d2e; }
+    .member-nick { color: #cdd1e6; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-you { color: #6b7290; font-size: 11px; margin-left: auto; }
+
+    /* ── 입력창 ── */
+    #input-area {
+      border-top: 1px solid #1e2235;
+      padding: 10px 14px;
+      background: #0e1020;
+      flex-shrink: 0;
+    }
+    #input-box {
+      display: flex; gap: 7px; align-items: flex-end;
+      background: #12151f; border: 1.5px solid #2a2f45;
+      border-radius: 13px; padding: 7px 7px 7px 13px;
+      transition: border-color .2s;
+    }
+    #input-box:focus-within { border-color: #5c6ef8; }
+    #msg-input {
+      flex: 1; background: transparent; border: none; color: #e8eaf0;
+      font-size: 14px; outline: none; font-family: 'DM Sans', sans-serif;
+      line-height: 1.5; max-height: 110px; overflow-y: auto; resize: none;
+    }
+    #img-btn {
+      background: none; border: none; color: #6b7290; font-size: 19px;
+      cursor: pointer; padding: 4px 5px; border-radius: 7px; line-height: 1;
+      transition: color .15s; flex-shrink: 0;
+    }
+    #img-btn:hover { color: #5c6ef8; }
+    #send-btn {
+      background: linear-gradient(135deg, #5c6ef8, #8b5cf6);
+      border: none; border-radius: 9px; padding: 7px 14px;
+      color: #fff; font-weight: 700; font-size: 13px; cursor: pointer;
+      font-family: 'DM Sans', sans-serif; white-space: nowrap; flex-shrink: 0;
+    }
+    #send-btn:disabled { background: #1e2235; color: #404565; cursor: default; }
+    #input-hint { color: #3a3f5c; font-size: 10.5px; margin-top: 5px; text-align: center; }
+
+    /* ── 이미지 확대 ── */
+    #img-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.92);
+      display: none; align-items: center; justify-content: center;
+      z-index: 300; cursor: zoom-out;
+    }
+    #img-modal.open { display: flex; }
+    #img-modal img { max-width: 90vw; max-height: 90dvh; border-radius: 12px; }
+
+    /* ── 채널 생성 모달 ── */
+    #add-ch-modal { display: none; }
+
+    /* ── 닉네임 모달 이전 목록 ── */
+    .prev-nicks-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .prev-nick-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; background: #0d0f1a; border: 1px solid #2a2f45;
+      border-radius: 9px; cursor: pointer; transition: border-color .15s;
+    }
+    .prev-nick-item:hover { border-color: #5c6ef8; }
+    .prev-nick-item .pn-text { color: #cdd1e6; font-size: 13.5px; font-weight: 600; }
+    .prev-nick-item .pn-lock { font-size: 11px; color: #f87171; margin-left: auto; }
+    .prev-nick-item .pn-lock.free { color: #34d399; }
+    .prev-nicks-label { color: #6b7290; font-size: 12px; font-weight: 600; }
+
+    /* 모바일 전용 */
+    @media (max-width: 600px) {
+      #members-panel { width: min(240px, 80vw); }
+      .msg-actions { opacity: 1; pointer-events: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════ 닉네임 설정 모달 ════════ -->
+<div id="nick-modal" class="modal-bg">
+  <div class="modal-box">
+    <div>
+      <div class="modal-title">👋 환영합니다</div>
+      <div class="modal-sub" id="nick-modal-sub">채팅에서 사용할 닉네임을 설정하세요</div>
+    </div>
+    <div id="prev-nicks-section" class="prev-nicks-wrap" style="display:none">
+      <div class="prev-nicks-label">이전에 사용한 닉네임</div>
+      <div id="prev-nicks-list"></div>
+    </div>
+    <input id="nick-input-first" class="field" maxlength="16" placeholder="닉네임 입력 (최대 16자)" />
+    <div id="nick-error" class="error-msg">⚠️ 다른 사람이 사용 중인 닉네임입니다</div>
+    <button class="btn-primary" onclick="submitFirstNick()">입장하기</button>
+  </div>
+</div>
+
+<!-- ════════ 닉네임 변경 모달 ════════ -->
+<div id="change-nick-modal" class="modal-bg" style="display:none">
+  <div class="modal-box" style="padding:34px 30px; width:min(320px,92vw)">
+    <div class="modal-title" style="font-size:19px">닉네임 변경</div>
+    <div id="change-prev-section" class="prev-nicks-wrap" style="display:none">
+      <div class="prev-nicks-label">이전 닉네임으로 전환</div>
+      <div id="change-prev-list"></div>
+    </div>
+    <input id="nick-input-change" class="field" maxlength="16" placeholder="새 닉네임 입력" />
+    <div id="change-nick-error" class="error-msg">⚠️ 다른 사람이 사용 중인 닉네임입니다</div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn-secondary" onclick="closeChangeNick()">취소</button>
+      <button class="btn-primary" style="flex:1; padding:11px" onclick="submitChangeNick()">변경</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ 채널 추가 모달 ════════ -->
+<div id="add-ch-modal" class="modal-bg">
+  <div class="modal-box" style="padding:34px 30px; width:min(320px,92vw)">
+    <div>
+      <div class="modal-title" style="font-size:19px">채널 만들기</div>
+      <div class="modal-sub">새 채널 이름을 입력하세요</div>
+    </div>
+    <input id="ch-name-input" class="field" maxlength="20" placeholder="채널 이름 (예: 자유, 게임, 공지)" />
+    <div style="display:flex; gap:10px;">
+      <button class="btn-secondary" onclick="closeAddChannel()">취소</button>
+      <button class="btn-primary" style="flex:1; padding:11px" onclick="submitAddChannel()">만들기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ 이미지 확대 ════════ -->
+<div id="img-modal" onclick="closeImgModal()">
+  <img id="img-modal-src" src="" alt="확대 이미지" onclick="event.stopPropagation()" />
+</div>
+
+<!-- ════════ 메인 앱 ════════ -->
+<div id="app">
+
+  <!-- 헤더 -->
+  <div id="header">
+    <div class="logo">🔥</div>
+    <div>
+      <div class="title" id="header-ch-name">채팅</div>
+      <div class="subtitle">
+        <div class="dot"></div>
+        <span class="online" id="online-count">접속 중...</span>
+      </div>
+    </div>
+    <button id="members-btn" onclick="toggleMembers()">👥 멤버</button>
+    <button id="nick-btn" onclick="openChangeNick()">
+      <div id="header-avatar" class="avatar" style="width:24px;height:24px;font-size:10px"></div>
+      <span class="nick-label" id="header-nick"></span>
+      <span class="nick-edit">✏️</span>
+    </button>
+  </div>
+
+  <!-- 채널 탭 바 -->
+  <div id="channel-bar">
+    <!-- JS로 탭 주입 -->
+    <button id="add-ch-btn" onclick="openAddChannel()" title="채널 추가">＋</button>
+  </div>
+
+  <!-- 바디 (메시지 + 멤버 패널) -->
+  <div id="body-wrap">
+
+    <!-- 메시지 목록 -->
+    <div id="messages">
+      <div id="empty">
+        <div class="emoji">💬</div>
+        <div class="main">첫 메시지를 보내보세요!</div>
+        <div class="sub">이 채널에서 대화를 시작하세요</div>
+      </div>
+    </div>
+
+    <!-- 멤버 오버레이 (모바일) -->
+    <div id="members-overlay" onclick="toggleMembers()"></div>
+
+    <!-- 멤버 패널 -->
+    <div id="members-panel">
+      <div class="panel-header">
+        <div class="panel-title">👥 접속 중인 멤버</div>
+        <button class="panel-close" onclick="toggleMembers()">✕</button>
+      </div>
+      <div class="member-list" id="member-list"></div>
+    </div>
+  </div>
+
+  <!-- 입력창 -->
+  <div id="input-area">
+    <div id="input-box">
+      <textarea id="msg-input" rows="1"
+        placeholder="메시지 입력..."
+        oninput="autoResize(this)"
+        onkeydown="handleKey(event)"></textarea>
+      <input id="file-input" type="file" accept="image/*" style="display:none" onchange="handleImage(event)" />
+      <button id="img-btn" onclick="document.getElementById('file-input').click()" title="이미지 전송">📷</button>
+      <button id="send-btn" disabled onclick="clickSend()">전송 ↑</button>
+    </div>
+    <div id="input-hint">Enter 전송 · Shift+Enter 줄바꿈 · 내 메시지 호버 → 수정/삭제</div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════
+// Firebase 설정
+// ════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyD9UwJVDpsAVBecMPAPhLKm9dM4-3NDopU",
+  authDomain: "test1-7e357.firebaseapp.com",
+  databaseURL: "https://test1-7e357-default-rtdb.firebaseio.com",
+  projectId: "test1-7e357",
+  storageBucket: "test1-7e357.firebasestorage.app",
+  messagingSenderId: "512007194016",
+  appId: "1:512007194016:web:455ae5a98d1963853e90c5"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ════════════════════════════════════
+// 유저 ID & 닉네임 관리
+// ════════════════════════════════════
+function getMyId() {
+  let id = localStorage.getItem("uid");
+  if (!id) { id = "u_" + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("uid", id); }
+  return id;
+}
+const MY_ID = getMyId();
+
+// 이전 닉네임 목록 (최대 5개, localStorage)
+function getPrevNicks() {
+  try { return JSON.parse(localStorage.getItem("prevNicks") || "[]"); } catch { return []; }
+}
+function savePrevNick(nick) {
+  let prev = getPrevNicks().filter(n => n !== nick);
+  prev.unshift(nick);
+  if (prev.length > 5) prev = prev.slice(0, 5);
+  localStorage.setItem("prevNicks", JSON.stringify(prev));
+}
+
+let myNick = localStorage.getItem("currentNick") || "";
+
+// ─ 현재 접속 닉네임 잠금 상태 캐시 (presence에서 읽어옴)
+let lockedNicks = {}; // nick → uid
+
+// ─ presence에서 닉네임 목록 실시간 수신
+db.ref("presence").on("value", snap => {
+  const data = snap.val() || {};
+  lockedNicks = {};
+  Object.values(data).forEach(info => {
+    if (info && info.nick) lockedNicks[info.nick] = info.uid;
+  });
+  renderMemberList(data);
+  const count = Object.keys(data).length;
+  document.getElementById("online-count").textContent = `${count}명 접속 중`;
+});
+
+function isNickLocked(nick) {
+  // 잠긴 닉네임인데 내 uid가 아닌 경우
+  return lockedNicks[nick] && lockedNicks[nick] !== MY_ID;
+}
+
+// ════════════════════════════════════
+// 채널 관리
+// ════════════════════════════════════
+const DEFAULT_CHANNELS = [
+  { id: "general", name: "💬 일반" },
+  { id: "random",  name: "🎲 잡담" },
+  { id: "game",    name: "🎮 게임" },
+];
+let channels = [];
+let currentChannel = "general";
+let channelListeners = {}; // channelId → unsubscribe ref
+let unreadMap = {}; // channelId → count (미읽음)
+
+function loadChannels(cb) {
+  db.ref("channels").once("value", snap => {
+    const data = snap.val() || {};
+    channels = DEFAULT_CHANNELS.slice();
+    // DB에 있는 추가 채널 병합
+    Object.entries(data).forEach(([id, info]) => {
+      if (!channels.find(c => c.id === id)) {
+        channels.push({ id, name: info.name || id });
+      }
+    });
+    if (cb) cb();
+    renderChannelBar();
+  });
+  // 실시간 채널 추가 감지
+  db.ref("channels").on("child_added", snap => {
+    const id = snap.key;
+    if (!channels.find(c => c.id === id)) {
+      const info = snap.val() || {};
+      channels.push({ id, name: info.name || id });
+      renderChannelBar();
+    }
+  });
+}
+
+function renderChannelBar() {
+  const bar = document.getElementById("channel-bar");
+  // 기존 탭 제거
+  bar.querySelectorAll(".ch-tab").forEach(el => el.remove());
+  const addBtn = document.getElementById("add-ch-btn");
+
+  channels.forEach(ch => {
+    const tab = document.createElement("button");
+    tab.className = "ch-tab" + (ch.id === currentChannel ? " active" : "");
+    tab.dataset.id = ch.id;
+
+    const unread = unreadMap[ch.id] || 0;
+    tab.innerHTML = `${escapeHtml(ch.name)}${unread > 0 && ch.id !== currentChannel ? `<span class="ch-badge ch-unread">${unread}</span>` : ""}`;
+    tab.onclick = () => switchChannel(ch.id);
+    bar.insertBefore(tab, addBtn);
+  });
+
+  document.getElementById("header-ch-name").textContent =
+    (channels.find(c => c.id === currentChannel) || {}).name || "채팅";
+}
+
+function switchChannel(id) {
+  if (id === currentChannel) return;
+  // 기존 리스너 해제
+  if (channelListeners[currentChannel]) {
+    db.ref(`messages/${currentChannel}`).off();
+  }
+  currentChannel = id;
+  unreadMap[id] = 0;
+  renderChannelBar();
+  document.getElementById("messages").querySelectorAll(".msg-row").forEach(el => el.remove());
+  document.getElementById("empty").style.display = "flex";
+  listenMessages();
+}
+
+// ─ 채널 추가 모달
+function openAddChannel() {
+  document.getElementById("ch-name-input").value = "";
+  document.getElementById("add-ch-modal").style.display = "flex";
+  setTimeout(() => document.getElementById("ch-name-input").focus(), 50);
+}
+function closeAddChannel() {
+  document.getElementById("add-ch-modal").style.display = "none";
+}
+function submitAddChannel() {
+  const name = document.getElementById("ch-name-input").value.trim();
+  if (!name) return;
+  const id = "ch_" + name.replace(/[^a-zA-Z0-9가-힣]/g, "").toLowerCase() + "_" + Date.now().toString(36);
+  db.ref(`channels/${id}`).set({ name: "💬 " + name, createdAt: Date.now(), createdBy: MY_ID });
+  closeAddChannel();
+  setTimeout(() => switchChannel(id), 300);
+}
+document.getElementById("ch-name-input").addEventListener("keydown", e => { if (e.key === "Enter") submitAddChannel(); });
+
+// ════════════════════════════════════
+// 아바타
+// ════════════════════════════════════
+const COLORS = ["#60a5fa","#34d399","#f472b6","#a78bfa","#fb923c","#38bdf8","#4ade80","#e879f9","#fbbf24","#2dd4bf"];
+function userColor(uid) {
+  let h = 0;
+  for (const c of String(uid)) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return COLORS[Math.abs(h) % COLORS.length];
+}
+function avatarHtml(nick, uid, size) {
+  const col = userColor(uid);
+  return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${size*.42}px;
+    background:${col}20;border:2px solid ${col};color:${col}">
+    ${(nick||"?")[0].toUpperCase()}</div>`;
+}
+
+// ════════════════════════════════════
+// 닉네임 모달
+// ════════════════════════════════════
+function renderPrevNicks(containerId, sectionId, onSelect) {
+  const prev = getPrevNicks();
+  const section = document.getElementById(sectionId);
+  const container = document.getElementById(containerId);
+  if (prev.length === 0) { section.style.display = "none"; return; }
+  section.style.display = "flex";
+  container.innerHTML = "";
+  prev.forEach(nick => {
+    const locked = isNickLocked(nick);
+    const item = document.createElement("div");
+    item.className = "prev-nick-item";
+    const col = userColor(MY_ID);
+    item.innerHTML = `
+      <div class="avatar" style="width:26px;height:26px;font-size:11px;background:${col}20;border:2px solid ${col};color:${col}">${nick[0].toUpperCase()}</div>
+      <span class="pn-text">${escapeHtml(nick)}</span>
+      <span class="pn-lock ${locked ? "" : "free"}">${locked ? "🔒 사용중" : "✓ 사용가능"}</span>
+    `;
+    if (!locked) {
+      item.onclick = () => onSelect(nick);
+    } else {
+      item.style.opacity = ".5";
+      item.style.cursor = "not-allowed";
+    }
+    container.appendChild(item);
+  });
+}
+
+function submitFirstNick() {
+  const val = document.getElementById("nick-input-first").value.trim();
+  if (!val) return;
+  if (isNickLocked(val)) {
+    document.getElementById("nick-error").classList.add("show");
+    return;
+  }
+  document.getElementById("nick-error").classList.remove("show");
+  setNickAndEnter(val);
+}
+document.getElementById("nick-input-first").addEventListener("keydown", e => { if (e.key === "Enter") submitFirstNick(); });
+document.getElementById("nick-input-first").addEventListener("input", () => {
+  document.getElementById("nick-error").classList.remove("show");
+});
+
+function setNickAndEnter(nick) {
+  myNick = nick;
+  localStorage.setItem("currentNick", nick);
+  savePrevNick(nick);
+  document.getElementById("nick-modal").style.display = "none";
+  initApp();
+}
+
+function openChangeNick() {
+  document.getElementById("nick-input-change").value = myNick;
+  document.getElementById("change-nick-error").classList.remove("show");
+  renderPrevNicks("change-prev-list", "change-prev-section", nick => {
+    applyChangeNick(nick);
+    closeChangeNick();
+  });
+  document.getElementById("change-nick-modal").style.display = "flex";
+  setTimeout(() => document.getElementById("nick-input-change").focus(), 50);
+}
+function closeChangeNick() {
+  document.getElementById("change-nick-modal").style.display = "none";
+}
+function submitChangeNick() {
+  const val = document.getElementById("nick-input-change").value.trim();
+  if (!val) return;
+  if (isNickLocked(val)) {
+    document.getElementById("change-nick-error").classList.add("show");
+    return;
+  }
+  applyChangeNick(val);
+  closeChangeNick();
+}
+document.getElementById("nick-input-change").addEventListener("keydown", e => { if (e.key === "Enter") submitChangeNick(); });
+document.getElementById("nick-input-change").addEventListener("input", () => {
+  document.getElementById("change-nick-error").classList.remove("show");
+});
+
+function applyChangeNick(nick) {
+  const oldNick = myNick;
+  myNick = nick;
+  localStorage.setItem("currentNick", nick);
+  savePrevNick(nick);
+  updateHeaderNick();
+  document.getElementById("msg-input").placeholder = `${myNick}으로 메시지 보내기...`;
+  // presence 업데이트
+  db.ref(`presence/${MY_ID}`).update({ nick, uid: MY_ID });
+}
+
+function updateHeaderNick() {
+  document.getElementById("header-nick").textContent = myNick;
+  const av = document.getElementById("header-avatar");
+  const col = userColor(MY_ID);
+  av.style.background = `${col}20`;
+  av.style.border = `2px solid ${col}`;
+  av.style.color = col;
+  av.textContent = myNick[0].toUpperCase();
+}
+
+// ════════════════════════════════════
+// 앱 초기화
+// ════════════════════════════════════
+function initApp() {
+  document.getElementById("app").style.display = "flex";
+  updateHeaderNick();
+  document.getElementById("msg-input").placeholder = `${myNick}으로 메시지 보내기...`;
+  trackPresence();
+  loadChannels(() => {
+    listenMessages();
+  });
+}
+
+// 페이지 로드 시: 닉네임 있으면 모달 건너뜀
+if (myNick) {
+  // 이전 닉 목록도 렌더 (잠금 여부는 presence 로드 후 갱신됨)
+  document.getElementById("nick-modal").style.display = "none";
+  initApp();
+} else {
+  // presence 로드 후 prev nicks 렌더링
+  db.ref("presence").once("value", () => {
+    renderPrevNicks("prev-nicks-list", "prev-nicks-section", nick => {
+      setNickAndEnter(nick);
+    });
+  });
+}
+
+// ════════════════════════════════════
+// Firebase Presence (닉네임 락)
+// ════════════════════════════════════
+function trackPresence() {
+  const myRef = db.ref(`presence/${MY_ID}`);
+  myRef.set({ nick: myNick, uid: MY_ID, ts: Date.now() });
+  myRef.onDisconnect().remove();
+}
+
+// ════════════════════════════════════
+// 멤버 패널
+// ════════════════════════════════════
+function renderMemberList(data) {
+  const list = document.getElementById("member-list");
+  list.innerHTML = "";
+  Object.entries(data).forEach(([uid, info]) => {
+    const isMe = uid === MY_ID;
+    const col = userColor(uid);
+    const item = document.createElement("div");
+    item.className = "member-item" + (isMe ? " me" : "");
+    item.innerHTML = `
+      <div class="avatar" style="width:28px;height:28px;font-size:12px;background:${col}20;border:2px solid ${col};color:${col}">
+        ${((info.nick || "?")[0]).toUpperCase()}
+      </div>
+      <span class="member-nick">${escapeHtml(info.nick || "알 수 없음")}</span>
+      ${isMe ? '<span class="member-you">나</span>' : ""}
+    `;
+    list.appendChild(item);
+  });
+}
+
+let membersOpen = false;
+function toggleMembers() {
+  membersOpen = !membersOpen;
+  document.getElementById("members-panel").classList.toggle("open", membersOpen);
+  document.getElementById("members-overlay").classList.toggle("show", membersOpen);
+}
+
+// ════════════════════════════════════
+// 메시지 리스너
+// ════════════════════════════════════
+function listenMessages() {
+  const msgRef = db.ref(`messages/${currentChannel}`).limitToLast(200);
+  msgRef.on("value", snap => {
+    const data = snap.val() || {};
+    const list = Object.entries(data)
+      .map(([key, val]) => ({ key, ...val }))
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    renderMessages(list);
+  });
+}
+
+// ════════════════════════════════════
+// 내 닉네임 이력 목록 (삭제/수정 권한)
+// ════════════════════════════════════
+function isMyMessage(msg) {
+  // uid 일치 OR 이전 닉네임 중 하나로 보낸 메시지
+  if (msg.uid === MY_ID) return true;
+  // 같은 기기에서 보낸 메시지 (localUid 저장)
+  if (msg.localUid && msg.localUid === MY_ID) return true;
+  return false;
+}
+
+// ════════════════════════════════════
+// 렌더링
+// ════════════════════════════════════
+function renderMessages(list) {
+  const container = document.getElementById("messages");
+  const empty = document.getElementById("empty");
+  empty.style.display = list.length === 0 ? "flex" : "none";
+  container.querySelectorAll(".msg-row").forEach(el => el.remove());
+
+  list.forEach(msg => {
+    const mine = isMyMessage(msg);
+    const col = userColor(msg.uid || msg.nick);
+    const time = new Date(msg.ts).toLocaleTimeString("ko-KR", {hour:"2-digit", minute:"2-digit"});
+
+    const row = document.createElement("div");
+    row.className = "msg-row";
+    row.dataset.key = msg.key;
+
+    let contentHtml;
+    if (msg.type === "image") {
+      contentHtml = `<img class="msg-img" src="${msg.content}" alt="이미지" onclick="openImgModal('${msg.content}')" />`;
+    } else {
+      const edited = msg.edited ? ' edited' : '';
+      contentHtml = `<div class="msg-text${edited}">${escapeHtml(msg.content)}</div>`;
+    }
+
+    const actions = mine ? `
+      <div class="msg-actions">
+        ${msg.type !== "image" ? `<button class="action-btn edit-action" onclick="startEdit('${msg.key}', this)">✏️ 수정</button>` : ""}
+        <button class="action-btn del-action" onclick="deleteMsg('${msg.key}')">🗑 삭제</button>
+      </div>` : "";
+
+    const editArea = mine && msg.type !== "image" ? `
+      <div class="edit-area" data-key="${msg.key}">
+        <textarea class="edit-textarea" rows="2">${escapeHtml(msg.content)}</textarea>
+        <div class="edit-btns">
+          <button class="edit-save" onclick="saveEdit('${msg.key}', this)">저장</button>
+          <button class="edit-cancel" onclick="cancelEdit('${msg.key}')">취소</button>
+        </div>
+      </div>` : "";
+
+    row.innerHTML = `
+      ${avatarHtml(msg.nick, msg.uid || msg.nick, 34)}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;">
+          <span class="msg-nick" style="color:${col}">${escapeHtml(msg.nick)}
+            ${mine ? '<span class="msg-me-tag">(나)</span>' : ''}
+          </span>
+          <span class="msg-time">${time}</span>
+        </div>
+        ${contentHtml}
+        ${editArea}
+      </div>
+      ${actions}
+    `;
+    container.appendChild(row);
+  });
+
+  container.scrollTop = container.scrollHeight;
+}
+
+// ════════════════════════════════════
+// 수정 기능
+// ════════════════════════════════════
+function startEdit(key, btn) {
+  // 다른 열린 수정창 닫기
+  document.querySelectorAll(".edit-area.open").forEach(el => {
+    if (el.dataset.key !== key) el.classList.remove("open");
+  });
+  const area = document.querySelector(`.edit-area[data-key="${key}"]`);
+  if (!area) return;
+  area.classList.toggle("open");
+  if (area.classList.contains("open")) {
+    const ta = area.querySelector("textarea");
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+}
+
+function saveEdit(key, btn) {
+  const area = document.querySelector(`.edit-area[data-key="${key}"]`);
+  if (!area) return;
+  const newText = area.querySelector("textarea").value.trim();
+  if (!newText) return;
+  db.ref(`messages/${currentChannel}/${key}`).update({ content: newText, edited: true, editedAt: Date.now() });
+  area.classList.remove("open");
+}
+
+function cancelEdit(key) {
+  const area = document.querySelector(`.edit-area[data-key="${key}"]`);
+  if (area) area.classList.remove("open");
+}
+
+// ════════════════════════════════════
+// 메시지 전송
+// ════════════════════════════════════
+function sendMessage(content, type = "text") {
+  const payload = { uid: MY_ID, localUid: MY_ID, nick: myNick, content, type, ts: Date.now() };
+  db.ref(`messages/${currentChannel}`).push(payload);
+}
+
+function handleKey(e) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    clickSend();
+  }
+}
+function clickSend() {
+  const val = document.getElementById("msg-input").value.trim();
+  if (!val) return;
+  sendMessage(val);
+  document.getElementById("msg-input").value = "";
+  document.getElementById("msg-input").style.height = "auto";
+  document.getElementById("send-btn").disabled = true;
+}
+
+document.getElementById("msg-input").addEventListener("input", function() {
+  document.getElementById("send-btn").disabled = !this.value.trim();
+});
+
+// ════════════════════════════════════
+// 이미지 전송
+// ════════════════════════════════════
+function handleImage(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 3 * 1024 * 1024) { alert("이미지는 3MB 이하만 가능합니다."); return; }
+  const reader = new FileReader();
+  reader.onload = ev => sendMessage(ev.target.result, "image");
+  reader.readAsDataURL(file);
+  e.target.value = "";
+}
+
+// ════════════════════════════════════
+// 메시지 삭제
+// ════════════════════════════════════
+function deleteMsg(key) {
+  if (!confirm("이 메시지를 삭제할까요?")) return;
+  db.ref(`messages/${currentChannel}/${key}`).remove();
+}
+
+// ════════════════════════════════════
+// 유틸
+// ════════════════════════════════════
+function autoResize(el) {
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 110) + "px";
+}
+function openImgModal(src) {
+  document.getElementById("img-modal-src").src = src;
+  document.getElementById("img-modal").classList.add("open");
+}
+function closeImgModal() {
+  document.getElementById("img-modal").classList.remove("open");
+}
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+    .replace(/\n/g,"<br>");
+}
+
+// ════════════════════════════════════
+// PWA 서비스 워커 등록
+// ════════════════════════════════════
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js")
+      .then(() => console.log("✅ 서비스워커 등록 완료"))
+      .catch(e => console.log("서비스워커 등록 실패:", e));
+  });
+}
+</script>
+</body>
+</html>
